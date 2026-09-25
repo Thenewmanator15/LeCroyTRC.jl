@@ -43,6 +43,12 @@ Manual (Appendix II, "Waveform Template"):
 surveying many captures. `readtrc(io)` reads from any stream (a file, a buffer, a pipe),
 forward only, and stops at the end of the record.
 
+`readtrc` runs at the speed of reading the file's bytes. Scaling costs more than reading:
+on a 50-million-point trace most of `volts(w)`'s time goes into filling its fresh
+`Float64` array. `volts!(buffer, w)` reuses one buffer across captures (about three times
+faster there), and `volts(Float32, w)` halves the memory (a 16-bit code is exact in
+`Float32`).
+
 Anything a file declares but does not hold (a truncated record, block lengths that do
 not add up, a sample format the template does not define) raises
 `LeCroyTRC.FormatError` naming the field, rather than returning misread data.

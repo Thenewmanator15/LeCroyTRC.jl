@@ -1,0 +1,18 @@
+name = "LeCroyTRC"
+uuid = "ff63a2ca-c320-4caa-833b-70ec8b3d2bed"
+authors = ["Mathew Newman <3686761+Thenewmanator15@users.noreply.github.com>"]
+version = "0.1.0"
+
+[deps]
+Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
+
+[compat]
+Dates = "<0.0.1, 1"
+julia = "1.6"
+
+[extras]
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Random", "Test"]

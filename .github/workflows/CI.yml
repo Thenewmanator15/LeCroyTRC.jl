@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ['1.6', '1', 'pre']
+        os: [ubuntu-latest]
+        arch: [x64]
+        include:
+          - {os: windows-latest, arch: x64, version: '1'}
+          - {os: macOS-latest, arch: aarch64, version: '1'}
+          - {os: ubuntu-latest, arch: x86, version: '1'}    # 32-bit Int
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: ${{ matrix.version }}
+          arch: ${{ matrix.arch }}
+      - uses: julia-actions/cache@v2
+      - uses: julia-actions/julia-buildpkg@v1
+      - uses: julia-actions/julia-runtest@v1
+
+  crosscheck:
+    name: Cross-check against lecroyutils (Python)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1'
+      - uses: julia-actions/cache@v2
+      - uses: julia-actions/julia-buildpkg@v1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install numpy lecroyutils==4.0.2
+      - run: julia --project=. test/crosscheck/write.jl "$RUNNER_TEMP/trc"
+      - run: python test/crosscheck/read.py "$RUNNER_TEMP/trc"

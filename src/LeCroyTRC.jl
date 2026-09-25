@@ -22,7 +22,7 @@ module LeCroyTRC
 
 using Dates
 
-export readtrc, trcinfo, TRCWaveform, TRCInfo, volts, times, segments, nsegments
+export readtrc, trcinfo, TRCWaveform, TRCInfo, volts, volts!, times, segments, nsegments
 
 """
     LeCroyTRC.FormatError(msg)
@@ -265,17 +265,38 @@ end
 
 """
     volts(w::TRCWaveform, array = 1) -> Vector{Float64}
+    volts(T, w::TRCWaveform, array = 1) -> Vector{T}
 
 The samples of DATA_ARRAY_1 (or `array = 2`: DATA_ARRAY_2) scaled as the template says,
 `VERTICAL_GAIN * code - VERTICAL_OFFSET`. The unit is `w.info.vertunit`: volts for a
 channel, whatever the scope says for a math or FFT trace.
+
+`T = Float32` holds any 16-bit code exactly and halves the memory. Most of the time of a
+long trace goes into the fresh output array itself; [`volts!`](@ref) reuses one.
 """
-function volts(w::TRCWaveform, array::Integer = 1)
-    data = array == 1 ? w.data1 : array == 2 ? w.data2 :
-           throw(ArgumentError("array must be 1 or 2, not $array"))
-    g, o = Float64(w.info.vertical_gain), Float64(w.info.vertical_offset)
-    [g * x - o for x in data]
+volts(w::TRCWaveform, array::Integer = 1) = volts(Float64, w, array)
+volts(::Type{T}, w::TRCWaveform, array::Integer = 1) where {T<:AbstractFloat} =
+    volts!(Vector{T}(undef, length(_array(w, array))), w, array)
+
+"""
+    volts!(out, w::TRCWaveform, array = 1) -> out
+
+[`volts`](@ref) into `out`, which must have the array's length: for many captures of
+one length, a buffer allocated once.
+"""
+function volts!(out::AbstractVector{T}, w::TRCWaveform, array::Integer = 1) where {T<:AbstractFloat}
+    data = _array(w, array)
+    length(out) == length(data) ||
+        throw(DimensionMismatch("out has $(length(out)) elements, DATA_ARRAY_$array $(length(data))"))
+    g, o = T(w.info.vertical_gain), T(w.info.vertical_offset)
+    @inbounds @simd for i in eachindex(out, data)
+        out[i] = g * data[i] - o
+    end
+    out
 end
+
+_array(w::TRCWaveform, array::Integer) =
+    array == 1 ? w.data1 : array == 2 ? w.data2 : throw(ArgumentError("array must be 1 or 2, not $array"))
 
 """
     nsegments(w::TRCWaveform) -> Int

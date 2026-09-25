@@ -65,6 +65,16 @@ end
     @test t[1] == -4.0e-6
     @test t[5] ≈ -4.0e-6 + 4 * Float64(2.5f-11)
     @test all(diff(collect(t)) .≈ Float64(2.5f-11))
+    # in place, into a buffer reused across files; and in a narrower type
+    out = fill(NaN, 5)
+    @test volts!(out, w) === out && out == volts(w)
+    @test volts(Float32, w) isa Vector{Float32}
+    @test volts(Float32, w) == Float32(2.7743299f-5) .* codes .- Float32(-0.56f0)
+    @test volts!(zeros(Float32, 5), w) == volts(Float32, w)
+    @test_throws DimensionMismatch volts!(zeros(4), w)
+    w2 = readtrc(IOBuffer(trc_bytes(codes; data2 = reverse(codes))))
+    @test volts!(zeros(5), w2, 2) == volts(w2, 2) && volts(Float32, w2, 2) ≈ volts(w2, 2)
+    @test (@allocated volts!(out, w)) == 0
 end
 
 @testset "byte samples keep their sign and type" begin

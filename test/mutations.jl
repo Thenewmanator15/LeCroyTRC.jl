@@ -18,7 +18,7 @@ mutations = [
     ("byte order never swapped", "_swap(big) && map!(_bswap, v, v)", "false && map!(_bswap, v, v)"),
     ("descriptor read little-endian always", "ld(::Type{T}, off) where {T} = _load(T, d, off, big)",
      "ld(::Type{T}, off) where {T} = _load(T, d, off, false)"),
-    ("offset added not subtracted", "[g * x - o for x in data]", "[g * x + o for x in data]"),
+    ("offset added not subtracted", "out[i] = g * data[i] - o", "out[i] = g * data[i] + o"),
     ("1-2-5 enum off by a decade", "e = 3 * (i ÷ 9) + base", "e = 3 * (i ÷ 9) + base + 1"),
     ("trailing NULs kept in user text", "String(_trim_nul(ut))", "String(copy(ut))"),
     ("segment axis from HORIZ_OFFSET", "_axis(w, w.info.trigger_offsets[k], size(segments(w), 1))",

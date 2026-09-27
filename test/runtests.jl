@@ -322,7 +322,8 @@ end
     trcinfo(io)
     @test position(io) == 346 + 3                            # left at DATA_ARRAY_1
     w = readtrc(path)
-    @test (@allocated readtrc(path)) < 4_000_000 + 200_000   # the data once, not twice
+    # the data once, not twice; the least of three, as @allocated can count other threads' work
+    @test minimum(_ -> (@allocated readtrc(path)), 1:3) < 4_000_000 + 200_000
     rm(path)
 end
 

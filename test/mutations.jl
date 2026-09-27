@@ -9,7 +9,7 @@ const WORK = joinpath(mktempdir(), "LeCroyTRC")
 
 mutations = [
     ("RIS_TIME not skipped",
-     "ris = _read_array!(io, Vector{Float64}(undef, rislen ÷ 8), big, \"RIS_TIME\", rislen)",
+     "ris = _read_array(io, Float64, rislen, big, \"RIS_TIME\")",
      "ris = Float64[]"),
     ("RES_DESC1 not skipped", "_discard(io, rd1, \"RES_DESC1\")", "nothing"),
     ("RES_ARRAY1 not skipped", "_discard(io, ra1, \"RES_ARRAY1\")", "nothing"),
@@ -24,8 +24,9 @@ mutations = [
     ("segment axis from HORIZ_OFFSET", "_axis(w, w.info.trigger_offsets[k], size(segments(w), 1))",
      "_axis(w, w.info.horiz_offset, size(segments(w), 1))"),
     ("TRIGTIME/SUBARRAY_COUNT mismatch ignored", "n == 0 || n == c ||", "true ||"),
-    ("second array not read", "data2 = _read_array!(io, Vector{T}(undef, info.wave_array_2 ÷ sizeof(T)), big,",
-     "data2 = (_discard(io, Int(info.wave_array_2), \"x\"); T[]); _unused = (io, Vector{T}(undef, 0), big,"),
+    ("second array not read", "data2 = _read_array(io, T, info.wave_array_2, big, \"DATA_ARRAY_2\")",
+     "data2 = (_discard(io, Int(info.wave_array_2), \"x\"); T[])"),
+    ("block lengths not checked against the input", "left === nothing || left >= n ||", "true ||"),
     ("trailing reserved arrays not consumed", "_discard(io, Int(info.res_array2) + Int(info.res_array3), \"RES_ARRAY2/RES_ARRAY3\")", "nothing"),
     ("count consistency not checked", "a1 == Int(count) * esz ||", "true ||"),
     ("byte samples read as words", "T = info.comm_type === :byte ? Int8 : Int16", "T = Int16"),

@@ -272,6 +272,24 @@ end
     e = try readtrc(p); nothing catch e; e end
     @test e isa LeCroyTRC.FormatError && occursin(basename(p), e.msg)
     rm(p)
+    # a length the input cannot hold is refused before anything is allocated for it
+    huge = 2_000_000_000
+    p = tempname() * ".trc"
+    for (block, bytes) in (("DATA_ARRAY_1", trc_bytes(codes; wave_array_1 = huge, wave_array_count = huge ÷ 2)),
+                           ("USERTEXT", trc_bytes(codes; user_text = huge)),
+                           ("TRIGTIME", trc_bytes(codes; trigtime_array = huge)),
+                           ("RIS_TIME", trc_bytes(codes; ris_time_array = huge)))
+        write(p, bytes)
+        for read_it in (() -> readtrc(IOBuffer(bytes)), () -> readtrc(p))
+            read_it_caught() = try read_it(); nothing catch e; e end
+            read_it_caught()
+            e = nothing
+            a = @allocated e = read_it_caught()
+            @test e isa LeCroyTRC.FormatError && occursin(block, e.msg)
+            @test a < 10^6
+        end
+    end
+    rm(p)
 end
 
 @testset "time axes refuse what they cannot place" begin

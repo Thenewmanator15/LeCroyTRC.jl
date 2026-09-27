@@ -159,10 +159,8 @@ function readtrc(io::IO)
     info = trcinfo(io)
     T = info.comm_type === :byte ? Int8 : Int16
     big = info.comm_order === :big
-    data1 = _read_array!(io, Vector{T}(undef, info.wave_array_1 ÷ sizeof(T)), big,
-                         "DATA_ARRAY_1", info.wave_array_1)
-    data2 = _read_array!(io, Vector{T}(undef, info.wave_array_2 ÷ sizeof(T)), big,
-                         "DATA_ARRAY_2", info.wave_array_2)
+    data1 = _read_array(io, T, info.wave_array_1, big, "DATA_ARRAY_1")
+    data2 = _read_array(io, T, info.wave_array_2, big, "DATA_ARRAY_2")
     _discard(io, Int(info.res_array2) + Int(info.res_array3), "RES_ARRAY2/RES_ARRAY3")
     TRCWaveform{T}(info, data1, data2)
 end
@@ -237,8 +235,8 @@ function trcinfo(io::IO)
     _discard(io, wdlen - DESCRIPTOR_BYTES, "the descriptor")
     ut = _read_bytes(io, utlen, "USERTEXT")
     _discard(io, rd1, "RES_DESC1")
-    tt = _read_array!(io, Vector{Float64}(undef, ttlen ÷ 8), big, "TRIGTIME", ttlen)
-    ris = _read_array!(io, Vector{Float64}(undef, rislen ÷ 8), big, "RIS_TIME", rislen)
+    tt = _read_array(io, Float64, ttlen, big, "TRIGTIME")
+    ris = _read_array(io, Float64, rislen, big, "RIS_TIME")
     _discard(io, ra1, "RES_ARRAY1")
 
     TRCInfo(_string(d, 16, 16), ct == 0 ? :byte : :word, big ? :big : :little,
@@ -453,7 +451,22 @@ function _datetime(year, month, day, hour, minute, secs)
     end
 end
 
+# The bytes left in `io`, where it can tell (a file, a buffer); `nothing` for a pipe or socket.
+_left(io::IOBuffer) = bytesavailable(io)
+_left(io::IOStream) = (s = stat(io); isfile(s) ? filesize(s) - position(io) : nothing)
+_left(io::IO) = nothing
+
+# Refuse a block the input cannot hold before allocating for it: a corrupt length
+# would otherwise cost up to 2 GB of memory before the read comes up short.
+function _need(io, n, what)
+    left = _left(io)
+    left === nothing || left >= n ||
+        throw(FormatError("input ends inside $what ($left of $n bytes)"))
+    nothing
+end
+
 function _read_bytes(io, n, what)
+    _need(io, n, what)
     b = read(io, n)
     length(b) == n || throw(FormatError("input ends inside $what ($(length(b)) of $n bytes)"))
     b
@@ -464,8 +477,10 @@ _discard(io, n, what) = (n > 0 && _read_bytes(io, n, what); nothing)
 # the file's byte order differs from this machine's
 _swap(big::Bool) = big == (Base.ENDIAN_BOM == 0x04030201)
 
-function _read_array!(io, v::Vector, big::Bool, what, nbytes)
-    isempty(v) && return v
+function _read_array(io, ::Type{T}, nbytes, big::Bool, what) where {T}
+    nbytes == 0 && return T[]
+    _need(io, nbytes, what)
+    v = Vector{T}(undef, nbytes ÷ sizeof(T))
     try
         read!(io, v)
     catch e

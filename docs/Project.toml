@@ -1,0 +1,9 @@
+[deps]
+Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+LeCroyTRC = "ff63a2ca-c320-4caa-833b-70ec8b3d2bed"
+
+[sources]
+LeCroyTRC = {path = "C:\\Users\\Work\\AppData\\Local\\Packages\\Claude_pzs8sxrjxfjjc\\LocalCache\\Roaming\\Claude\\scratch-workspaces\\881ab725-82c2-48f8-aadf-f7151f1c82fb\\fe994030-903d-41c9-8a85-4ede6270444c\\scratch-2026-10-06-e8e357\\LeCroyTRC.jl"}
+
+[compat]
+Documenter = "1"

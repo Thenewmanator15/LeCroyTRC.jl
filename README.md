@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/Thenewmanator15/LeCroyTRC.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/Thenewmanator15/LeCroyTRC.jl/actions/workflows/CI.yml)
 [![codecov](https://codecov.io/gh/Thenewmanator15/LeCroyTRC.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/Thenewmanator15/LeCroyTRC.jl)
+[![docs](https://img.shields.io/badge/docs-dev-blue.svg)](https://thenewmanator15.github.io/LeCroyTRC.jl/dev/)
 
 Read LeCroy oscilloscope waveform files (`.trc`) in Julia: the binary format a LeCroy
 scope writes when a trace is saved to disk, and its reply to `WF? ALL`. No dependencies

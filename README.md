@@ -85,6 +85,10 @@ their points a subset of the acquisition, whose times it cannot place.
 - `volts` scales into `w.info.vertunit` and `times` into `w.info.horunit`: volts and
   seconds for a channel, whatever the scope records for a math or FFT trace.
 
-## Licence
+## AI disclosure
 
-MIT
+Written with Claude Code (Claude Opus 5.5) assisting. The test and measurement work is
+mine: the WavePro 740Zi captures, and checking the reader against them and against the
+reader it replaces. I reviewed every change by hand before committing it, and the
+commits Claude contributed to carry a `Co-Authored-By: Claude` trailer. See
+[AI_DISCLOSURE.md](AI_DISCLOSURE.md).

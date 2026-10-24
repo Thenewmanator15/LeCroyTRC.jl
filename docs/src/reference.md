@@ -32,3 +32,9 @@ times
 nsegments
 segments
 ```
+
+## With Unitful
+
+```@docs
+LeCroyTRC.units
+```

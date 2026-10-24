@@ -85,6 +85,17 @@ not add up, a sample format the template does not define) raises
 `times` refuses records transferred with a `FIRST_POINT` or `SPARSING_FACTOR` that makes
 their points a subset of the acquisition, whose times it cannot place.
 
+## With other packages
+
+These load only beside the package they name (Julia 1.9 package extensions):
+
+- **Tables.jl**: a waveform is a table of `time` and `volts` (and `segment`, for a
+  sequence capture), so `DataFrame(w)` works.
+- **Unitful**: `h, v = LeCroyTRC.units(w)` are the units of `horunit` and `vertunit`, so
+  `times(w) * h` and `volts(w) * v` are quantities. LeCroy's `"S"` is read as seconds.
+- **FileIO**: `load("capture.trc")` calls `readtrc`, once the format is in FileIO's
+  registry.
+
 ## How it is checked
 
 - **The template.** The tests write files byte for byte from the template, with a writer

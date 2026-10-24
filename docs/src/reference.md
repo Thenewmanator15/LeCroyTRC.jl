@@ -5,6 +5,7 @@
 ```@docs
 readtrc
 trcinfo
+trcmap
 trcread
 trcblocks
 LeCroyTRC.FormatError

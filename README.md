@@ -62,6 +62,12 @@ trcblocks("C1--capture--00000.trc"; blocksize = 2^20) do codes, offset
 end
 ```
 
+`trcmap(file)` is `readtrc` with the samples mapped from the file rather than read: a
+record of any size opens at once, and the operating system reads only the pages that
+are touched. Its `data1` and `data2` are read-only. While such a waveform is alive, do
+not let anything change the file (on Windows it cannot be deleted or replaced at all);
+for a file still being written, use `readtrc`.
+
 `trcread` skips to the window in a file or buffer and reads its way there on any other
 stream. `trcblocks` also takes `memory`, a byte budget for its buffer.
 `readtrc(file; memory)` refuses a record whose samples would take more than `memory`

@@ -23,7 +23,8 @@ module LeCroyTRC
 using Dates
 import PrecompileTools
 
-export readtrc, trcinfo, TRCWaveform, TRCInfo, volts, volts!, times, segments, nsegments
+export readtrc, trcinfo, trcread, trcblocks, TRCWaveform, TRCInfo, volts, volts!, times,
+       segments, nsegments
 
 """
     LeCroyTRC.FormatError(msg)
@@ -151,19 +152,108 @@ another (a sequence of `WF? ALL` replies, say) are read by calling `readtrc` aga
 Anything before `WAVEDESC` in the first 64 bytes (a `#9…` block header, a `C1:WF ALL,`
 echo) is skipped.
 
+`memory` is a byte budget for the samples: a record whose data arrays would take more is
+refused with an `ArgumentError` before any of them is read. [`trcread`](@ref) and
+[`trcblocks`](@ref) read such a record in parts.
+
 Throws [`LeCroyTRC.FormatError`](@ref) for input that is not a LeCroy waveform or does
 not hold what its descriptor declares.
 """
-readtrc(file::AbstractString) = _named(file, () -> open(readtrc, file))
+readtrc(file::AbstractString; memory::Integer = Sys.free_memory()) =
+    _named(file, () -> open(io -> readtrc(io; memory), file))
 
-function readtrc(io::IO)
+function readtrc(io::IO; memory::Integer = Sys.free_memory())
     info = trcinfo(io)
-    T = info.comm_type === :byte ? Int8 : Int16
+    need = Int64(info.wave_array_1) + Int64(info.wave_array_2)
+    # a record the input cannot hold is a FormatError, whatever the budget
+    _need(io, need, info.wave_array_2 > 0 ? "DATA_ARRAY_1 and DATA_ARRAY_2" : "DATA_ARRAY_1")
+    need <= memory || throw(ArgumentError("the samples take $need bytes, more than memory = $memory; " *
+                                          "read them in parts with trcread or trcblocks"))
+    T = _eltype(info)
     big = info.comm_order === :big
     data1 = _read_array(io, T, info.wave_array_1, big, "DATA_ARRAY_1")
     data2 = _read_array(io, T, info.wave_array_2, big, "DATA_ARRAY_2")
     _discard(io, Int(info.res_array2) + Int(info.res_array3), "RES_ARRAY2/RES_ARRAY3")
     TRCWaveform{T}(info, data1, data2)
+end
+
+_eltype(info) = info.comm_type === :byte ? Int8 : Int16
+
+"""
+    trcread(file, r) -> Vector{Int8} or Vector{Int16}
+    trcread(io::IO, r)
+
+The codes `r` (1-based) of DATA_ARRAY_1, without reading the others: a window of a long
+trace. For a sequence capture, `r` indexes every segment one after another, as `data1`
+does. Scale them with [`volts(info, codes)`](@ref volts) and place them with
+[`times(info, r)`](@ref times), `info` being [`trcinfo(file)`](@ref trcinfo).
+
+A file or buffer skips to the window; any other stream reads its way there. A stream is
+left after the window, inside the record.
+"""
+trcread(file::AbstractString, r::AbstractUnitRange{<:Integer}) =
+    _named(file, () -> open(io -> trcread(io, r), file))
+
+function trcread(io::IO, r::AbstractUnitRange{<:Integer})
+    info = trcinfo(io)
+    T = _eltype(info)
+    n = Int(info.wave_array_count)
+    isempty(r) || (1 <= first(r) && last(r) <= n) || throw(BoundsError(1:n, r))
+    _discard(io, (first(r) - 1) * sizeof(T), "DATA_ARRAY_1")
+    _read_array(io, T, length(r) * sizeof(T), info.comm_order === :big, "DATA_ARRAY_1")
+end
+
+"""
+    trcblocks(f, file; blocksize = 2^20, memory = nothing) -> number of codes
+    trcblocks(f, io::IO; ...)
+
+Read DATA_ARRAY_1 in blocks of `blocksize` codes and call `f(codes, offset)` on each,
+`offset` being the 0-based index of `codes[1]`: a pass over a long trace in bounded
+memory. `codes` is one buffer, reused from block to block: `copy` it to keep a block.
+The last block is shorter, never padded. `memory` is a byte budget for that buffer,
+which then holds at most `memory ÷ sizeof(code)` codes. Scale a block with
+[`volts!(out, info, codes)`](@ref volts!).
+
+`f` may resize `codes` (the next block is read at its own length all the same), and may
+read the same file through a path of its own. It must not read from or move the stream
+`trcblocks` reads: on a file or buffer, that is an `ArgumentError` rather than misread
+blocks.
+"""
+trcblocks(f, file::AbstractString; kwargs...) =
+    _named(file, () -> open(io -> trcblocks(f, io; kwargs...), file))
+
+function trcblocks(f, io::IO; blocksize::Integer = 2^20, memory::Union{Nothing,Integer} = nothing)
+    info = trcinfo(io)
+    T = _eltype(info)
+    if memory !== nothing
+        memory >= sizeof(T) || throw(ArgumentError("memory = $memory bytes holds no $T code"))
+        blocksize = min(blocksize, memory ÷ sizeof(T))
+    end
+    blocksize >= 1 || throw(ArgumentError("blocksize = $blocksize"))
+    n = Int(info.wave_array_count)
+    _need(io, n * sizeof(T), "DATA_ARRAY_1")
+    swap = _swap(info.comm_order === :big)
+    buf = Vector{T}(undef, min(blocksize, n))
+    seekable = _left(io) !== nothing
+    done = 0
+    while done < n
+        k = min(blocksize, n - done)
+        length(buf) == k || resize!(buf, k)        # the last block, or one f resized
+        try
+            read!(io, buf)
+        catch e
+            e isa EOFError || rethrow()
+            throw(FormatError("input ends inside DATA_ARRAY_1, which the descriptor declares as $(n * sizeof(T)) bytes"))
+        end
+        swap && map!(_bswap, buf, buf)
+        at = seekable ? position(io) : 0
+        f(buf, done)
+        seekable && position(io) != at &&
+            throw(ArgumentError("f read from or moved the stream trcblocks is reading; " *
+                                "to read the file inside f, open it again"))
+        done += k
+    end
+    n
 end
 
 """
@@ -265,31 +355,39 @@ end
 """
     volts(w::TRCWaveform, array = 1) -> Vector{Float64}
     volts(T, w::TRCWaveform, array = 1) -> Vector{T}
+    volts([T,] info::TRCInfo, codes)
 
 The samples of DATA_ARRAY_1 (or `array = 2`: DATA_ARRAY_2) scaled as the template says,
 `VERTICAL_GAIN * code - VERTICAL_OFFSET`. The unit is `w.info.vertunit`: volts for a
-channel, whatever the scope says for a math or FFT trace.
+channel, whatever the scope says for a math or FFT trace. With `info`, scales `codes`
+read in parts by [`trcread`](@ref) or [`trcblocks`](@ref).
 
 `T = Float32` holds any 16-bit code exactly and halves the memory. Most of the time of a
 long trace goes into the fresh output array itself; [`volts!`](@ref) reuses one.
 """
 volts(w::TRCWaveform, array::Integer = 1) = volts(Float64, w, array)
 volts(::Type{T}, w::TRCWaveform, array::Integer = 1) where {T<:AbstractFloat} =
-    volts!(Vector{T}(undef, length(_array(w, array))), w, array)
+    volts(T, w.info, _array(w, array))
+volts(info::TRCInfo, codes::AbstractVector{<:Integer}) = volts(Float64, info, codes)
+volts(::Type{T}, info::TRCInfo, codes::AbstractVector{<:Integer}) where {T<:AbstractFloat} =
+    volts!(Vector{T}(undef, length(codes)), info, codes)
 
 """
     volts!(out, w::TRCWaveform, array = 1) -> out
+    volts!(out, info::TRCInfo, codes) -> out
 
 [`volts`](@ref) into `out`, which must have the array's length: for many captures of
 one length, a buffer allocated once.
 """
-function volts!(out::AbstractVector{T}, w::TRCWaveform, array::Integer = 1) where {T<:AbstractFloat}
-    data = _array(w, array)
-    length(out) == length(data) ||
-        throw(DimensionMismatch("out has $(length(out)) elements, DATA_ARRAY_$array $(length(data))"))
-    g, o = T(w.info.vertical_gain), T(w.info.vertical_offset)
-    @inbounds @simd for i in eachindex(out, data)
-        out[i] = g * data[i] - o
+volts!(out::AbstractVector{<:AbstractFloat}, w::TRCWaveform, array::Integer = 1) =
+    volts!(out, w.info, _array(w, array))
+
+function volts!(out::AbstractVector{T}, info::TRCInfo, codes::AbstractVector{<:Integer}) where {T<:AbstractFloat}
+    length(out) == length(codes) ||
+        throw(DimensionMismatch("out has $(length(out)) elements, the codes $(length(codes))"))
+    g, o = T(info.vertical_gain), T(info.vertical_offset)
+    @inbounds @simd for i in eachindex(out, codes)
+        out[i] = g * codes[i] - o
     end
     out
 end
@@ -329,11 +427,13 @@ end
 """
     times(w::TRCWaveform) -> AbstractRange
     times(w::TRCWaveform, k) -> AbstractRange
+    times(info::TRCInfo, r) -> AbstractRange
 
 The horizontal axis of a single sweep: `HORIZ_OFFSET + i * HORIZ_INTERVAL`, in
 `w.info.horunit` (seconds for a time-domain trace). For segment `k` of a sequence
 capture, the time of each point from that segment's own trigger (add
-`w.info.trigger_times[k]` for the time from the first trigger).
+`w.info.trigger_times[k]` for the time from the first trigger). With `info`, the times of
+points `r` of a single sweep, for codes read by [`trcread`](@ref): `times(w)[r]`.
 
 Throws `ArgumentError` for a sequence without `k`, a sequence without a TRIGTIME array,
 and records transferred with a FIRST_POINT or SPARSING_FACTOR that makes their points a
@@ -342,7 +442,13 @@ subset of the acquisition.
 function times(w::TRCWaveform)
     n = nsegments(w)
     n == 1 || throw(ArgumentError("a sequence of $n segments: use times(w, k) for segment k"))
-    _axis(w, w.info.horiz_offset, length(w.data1))
+    _axis(w.info, w.info.horiz_offset, length(w.data1))
+end
+
+function times(info::TRCInfo, r::AbstractUnitRange{<:Integer})
+    n = nsegments(info)
+    n == 1 || throw(ArgumentError("a sequence of $n segments: times(info, r) places a single sweep"))
+    _axis(info, info.horiz_offset, Int(info.wave_array_count))[r]
 end
 
 function times(w::TRCWaveform, k::Integer)
@@ -351,11 +457,10 @@ function times(w::TRCWaveform, k::Integer)
     n == 1 && return times(w)
     isempty(w.info.trigger_offsets) &&
         throw(ArgumentError("$n segments but no TRIGTIME array: their offsets from the trigger are unknown"))
-    _axis(w, w.info.trigger_offsets[k], size(segments(w), 1))
+    _axis(w.info, w.info.trigger_offsets[k], size(segments(w), 1))
 end
 
-function _axis(w, start, n)
-    i = w.info
+function _axis(i::TRCInfo, start, n)
     i.first_point == 0 && i.sparsing_factor <= 1 ||
         throw(ArgumentError("FIRST_POINT = $(i.first_point), SPARSING_FACTOR = $(i.sparsing_factor): " *
                             "the points are a subset of the acquisition, and their times are not placed"))
@@ -473,7 +578,20 @@ function _read_bytes(io, n, what)
     b
 end
 
-_discard(io, n, what) = (n > 0 && _read_bytes(io, n, what); nothing)
+# Pass over `n` bytes: a seek where the input says how much it holds, else reads of at
+# most 64 KiB, so a long skip never allocates its length.
+function _discard(io, n, what)
+    n > 0 || return nothing
+    _need(io, n, what)
+    _left(io) === nothing || return (skip(io, n); nothing)
+    left = n
+    while left > 0
+        k = length(read(io, min(left, 1 << 16)))
+        k == 0 && throw(FormatError("input ends inside $what ($(n - left) of $n bytes)"))
+        left -= k
+    end
+    nothing
+end
 
 # the file's byte order differs from this machine's
 _swap(big::Bool) = big == (Base.ENDIAN_BOM == 0x04030201)
@@ -504,9 +622,13 @@ PrecompileTools.@setup_workload begin
     PrecompileTools.@compile_workload begin
         w = readtrc(example)
         volts(w); volts(Float32, w); times(w); segments(w)
-        trcinfo(example)
+        info = trcinfo(example)
         open(readtrc, example)
         readtrc(IOBuffer(read(example)))
+        codes = trcread(example, 1:100)
+        volts(info, codes); times(info, 1:100)
+        out = zeros(Float32, 64)
+        trcblocks((c, _) -> volts!(view(out, 1:length(c)), info, c), example; blocksize = 64)
     end
 end
 

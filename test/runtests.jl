@@ -1,4 +1,5 @@
 using LeCroyTRC, Test, Dates, Random
+import Aqua
 
 include("writer.jl")
 
@@ -401,6 +402,10 @@ end
 end
 
 VERSION >= v"1.9" && include("extensions.jl")
+
+@testset "Aqua: ambiguities, piracy, stale dependencies, compat bounds" begin
+    Aqua.test_all(LeCroyTRC)
+end
 
 # Real captures, when a folder of them is named: every file must read, and agree with
 # what the descriptor promises.

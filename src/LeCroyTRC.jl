@@ -21,6 +21,7 @@ it does not contain is refused with a [`LeCroyTRC.FormatError`](@ref), never mis
 module LeCroyTRC
 
 using Dates
+import PrecompileTools
 
 export readtrc, trcinfo, TRCWaveform, TRCInfo, volts, volts!, times, segments, nsegments
 
@@ -492,5 +493,21 @@ function _read_array(io, ::Type{T}, nbytes, big::Bool, what) where {T}
 end
 
 _bswap(x::T) where {T} = reinterpret(T, bswap(reinterpret(_unsigned(T), x)))
+
+# ── precompilation ──────────────────────────────────────────────────────────────
+
+# What precompilation runs, so that the first read in a session is not spent compiling:
+# the example capture, read from its path and from streams, scaled and timed.
+PrecompileTools.@setup_workload begin
+    example = joinpath(@__DIR__, "..", "test", "example_files",
+                       "C2--detector-newamp-comparetoraw--splitcorr--00000.trc")
+    PrecompileTools.@compile_workload begin
+        w = readtrc(example)
+        volts(w); volts(Float32, w); times(w); segments(w)
+        trcinfo(example)
+        open(readtrc, example)
+        readtrc(IOBuffer(read(example)))
+    end
+end
 
 end # module

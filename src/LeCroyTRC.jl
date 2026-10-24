@@ -157,6 +157,11 @@ another (a sequence of `WF? ALL` replies, say) are read by calling `readtrc` aga
 Anything before `WAVEDESC` in the first 64 bytes (a `#9…` block header, a `C1:WF ALL,`
 echo) is skipped.
 
+Each call opens its own file, so any number of calls, nested or from several tasks at
+once, may read the same path. Tasks may also share one open `IOStream`: each call holds
+its lock for a whole record, so each task reads whole records. A buffer or pipe must
+not be read by two tasks at once, as with any read in Julia.
+
 `memory` is a byte budget for the samples: a record whose data arrays would take more is
 refused with an `ArgumentError` before any of them is read. [`trcread`](@ref) and
 [`trcblocks`](@ref) read such a record in parts.
@@ -167,7 +172,9 @@ not hold what its descriptor declares.
 readtrc(file::AbstractString; memory::Integer = Sys.free_memory()) =
     _named(file, () -> open(io -> readtrc(io; memory), file))
 
-function readtrc(io::IO; memory::Integer = Sys.free_memory())
+readtrc(io::IO; memory::Integer = Sys.free_memory()) = _locked(() -> _readtrc(io, memory), io)
+
+function _readtrc(io, memory)
     info = trcinfo(io)
     need = _need_data(io, info)
     need <= memory || throw(ArgumentError("the samples take $need bytes, more than memory = $memory; " *
@@ -204,7 +211,9 @@ For a file that may still be written to, use `readtrc`.
 """
 trcmap(file::AbstractString) = _named(file, () -> open(trcmap, file))
 
-function trcmap(io::IOStream)
+trcmap(io::IOStream) = _locked(() -> _trcmap(io), io)
+
+function _trcmap(io)
     info = trcinfo(io)
     _need_data(io, info)
     _mapped(io, info, _eltype(info))
@@ -251,7 +260,9 @@ left after the window, inside the record.
 trcread(file::AbstractString, r::AbstractUnitRange{<:Integer}) =
     _named(file, () -> open(io -> trcread(io, r), file))
 
-function trcread(io::IO, r::AbstractUnitRange{<:Integer})
+trcread(io::IO, r::AbstractUnitRange{<:Integer}) = _locked(() -> _trcread(io, r), io)
+
+function _trcread(io, r)
     info = trcinfo(io)
     T = _eltype(info)
     n = Int(info.wave_array_count)
@@ -274,12 +285,16 @@ which then holds at most `memory ÷ sizeof(code)` codes. Scale a block with
 `f` may resize `codes` (the next block is read at its own length all the same), and may
 read the same file through a path of its own. It must not read from or move the stream
 `trcblocks` reads: on a file or buffer, that is an `ArgumentError` rather than misread
-blocks.
+blocks. An `IOStream` stays locked while `f` runs, so `f` must not wait for another task
+that reads it.
 """
 trcblocks(f, file::AbstractString; kwargs...) =
     _named(file, () -> open(io -> trcblocks(f, io; kwargs...), file))
 
-function trcblocks(f, io::IO; blocksize::Integer = 2^20, memory::Union{Nothing,Integer} = nothing)
+trcblocks(f, io::IO; blocksize::Integer = 2^20, memory::Union{Nothing,Integer} = nothing) =
+    _locked(() -> _trcblocks(f, io, blocksize, memory), io)
+
+function _trcblocks(f, io, blocksize, memory)
     info = trcinfo(io)
     T = _eltype(info)
     if memory !== nothing
@@ -322,7 +337,9 @@ the samples. On a stream, leaves the position at the first sample.
 """
 trcinfo(file::AbstractString) = _named(file, () -> open(trcinfo, file))
 
-function trcinfo(io::IO)
+trcinfo(io::IO) = _locked(() -> _trcinfo(io), io)
+
+function _trcinfo(io)
     head = read(io, SEARCH_BYTES)
     isempty(head) && throw(FormatError("empty input: no WAVEDESC"))
     o = _find(head, codeunits("WAVEDESC"))
@@ -553,6 +570,21 @@ function _summary(io, i::TRCInfo)
 end
 
 # ── helpers ─────────────────────────────────────────────────────────────────────
+
+# Run f holding the stream's lock, so that tasks sharing one IOStream each read whole
+# records. It is the ReentrantLock each of the stream's own reads takes (`lock(::IO)` is
+# a no-op), so a call nested in the same task goes straight in; a stream opened with
+# `lock = false` is not locked.
+function _locked(f, io::IOStream)
+    io._dolock || return f()
+    lock(io.lock)
+    try
+        f()
+    finally
+        unlock(io.lock)
+    end
+end
+_locked(f, io) = f()
 
 # run f, naming the file in any FormatError it throws
 function _named(file, f)

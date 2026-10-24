@@ -92,6 +92,10 @@ their points a subset of the acquisition, whose times it cannot place.
   the RIS_TIME array.
 - **Real captures.** On 1,943 captures from a WavePro 740Zi, LeCroyTRC agrees sample for
   sample with lecroyutils and with the reader it replaces.
+- **Long records.** Every run writes a 100 MB record in both byte orders and a sequence
+  of 1000 segments, and checks that a window at the far end is skipped to, not read
+  through, and that blocks and the memory budget hold. `LECROYTRC_STRESS=1` adds a
+  record at the template's largest data array (2 GB, the file past 2^31 bytes).
 - **Mutation.** Each plausible misreading of the template (a block not skipped, day and
   month swapped, the byte order ignored, …) makes the tests fail.
 

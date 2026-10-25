@@ -43,3 +43,18 @@ end
     @test_throws Exception redirect_stderr(() -> FileIO.load(p; memory = 1), devnull)
     rm(p)
 end
+
+@testset "extensions used the wrong way" begin
+    # seconds inside compound units too; no unit at all; and what uparse reads as a number
+    u(vertunit) = LeCroyTRC.units(trcinfo(IOBuffer(trc_bytes(Int16[0]; vertunit)))).vertical
+    @test u("V*S") == u"V*s" && u("V/S") == u"V/s"
+    @test u("") == Unitful.NoUnits
+    for s in ("2V", "1", "pi", "Volts")
+        @test_throws ArgumentError u(s)
+    end
+    # a sequence of many segments as a table: in time and memory linear in its points
+    s = readtrc(IOBuffer(trc_bytes(rand(MersenneTwister(7), Int16, 100, 1000))))
+    Tables.columntable(s)
+    @test (@allocated Tables.columntable(s)) < 10^7                # 100k points; 0.4 GB before
+    @test Tables.columntable(s).time == reduce(vcat, [collect(times(s, k)) for k in 1:1000])
+end

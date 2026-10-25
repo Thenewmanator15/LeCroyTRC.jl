@@ -71,7 +71,7 @@ for a file still being written, use `readtrc`.
 `trcread` skips to the window in a file or buffer and reads its way there on any other
 stream. `trcblocks` also takes `memory`, a byte budget for its buffer.
 `readtrc(file; memory)` refuses a record whose samples would take more than `memory`
-bytes (default: the free RAM) before reading any of them.
+bytes (default: the machine's memory, `Sys.total_memory()`) before reading any of them.
 
 `readtrc` runs at the speed of reading the file's bytes. Scaling costs more than reading:
 on a 50-million-point trace most of `volts(w)`'s time goes into filling its fresh

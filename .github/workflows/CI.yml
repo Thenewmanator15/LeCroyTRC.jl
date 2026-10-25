@@ -46,7 +46,9 @@ jobs:
   # resolver runs on. The matrix above tests only the newest versions.
   downgrade:
     name: Lowest compat versions - Julia 1.9
-    runs-on: ubuntu-latest
+    # Julia 1.9's libopenlibm asks for an executable stack, which the C library of the
+    # current ubuntu-latest refuses ("cannot enable executable stack"); 22.04's allows it.
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: julia-actions/setup-julia@v2

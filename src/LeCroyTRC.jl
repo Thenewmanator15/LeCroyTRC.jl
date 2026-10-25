@@ -159,15 +159,17 @@ echo) is skipped.
 
 `memory` is a byte budget for the samples: a record whose data arrays would take more is
 refused with an `ArgumentError` before any of them is read. [`trcread`](@ref) and
-[`trcblocks`](@ref) read such a record in parts.
+[`trcblocks`](@ref) read such a record in parts. The default is the machine's memory,
+`Sys.total_memory()`, not `Sys.free_memory()`: macOS counts only pages nothing uses as
+free, and would refuse ordinary files.
 
 Throws [`LeCroyTRC.FormatError`](@ref) for input that is not a LeCroy waveform or does
 not hold what its descriptor declares.
 """
-readtrc(file::AbstractString; memory::Integer = Sys.free_memory()) =
+readtrc(file::AbstractString; memory::Integer = Sys.total_memory()) =
     _named(file, () -> open(io -> readtrc(io; memory), file))
 
-function readtrc(io::IO; memory::Integer = Sys.free_memory())
+function readtrc(io::IO; memory::Integer = Sys.total_memory())
     info = trcinfo(io)
     need = _need_data(io, info)
     need <= memory || throw(ArgumentError("the samples take $need bytes, more than memory = $memory; " *

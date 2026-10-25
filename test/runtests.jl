@@ -372,6 +372,28 @@ end
     @test occursin("TRCWaveform", sprint(show, w))
 end
 
+# A real capture: a WavePro 740Zi trace of the ZFL-1000LN+ detector amplifier, with the
+# scope's serial number replaced by 1234 and nothing else changed.
+@testset "the example capture, from its path and from streams" begin
+    p = joinpath(@__DIR__, "example_files", "C2--detector-newamp-comparetoraw--splitcorr--00000.trc")
+    w = readtrc(p)
+    @test w isa TRCWaveform{Int16} && length(w.data1) == 4002 && isempty(w.data2)
+    i = w.info
+    @test i.instrument_name == "LECROYWP740Zi" && i.instrument_number == 1234
+    @test i.wave_source === :channel_2 && i.record_type === :single_sweep
+    @test i.trigger_time == DateTime(2007, 4, 9, 1, 40, 57, 949)    # the scope's clock was wrong
+    @test i.horiz_interval === 2.5f-11 && i.vertunit == "V" && i.horunit == "S"
+    @test extrema(w.data1) == (4160, 6737) && sum(Int, w.data1) == 24_930_697
+    for s in (open(readtrc, p), readtrc(IOBuffer(read(p))))
+        @test s.data1 == w.data1 && s.data2 == w.data2
+        @test all(f -> isequal(getfield(s.info, f), getfield(i, f)), fieldnames(TRCInfo))
+    end
+    io = IOBuffer(vcat(read(p), read(p)))                           # from the current position
+    @test readtrc(io).data1 == w.data1 && position(io) == filesize(p)
+    @test readtrc(io).data1 == w.data1 && eof(io)
+    @test all(f -> isequal(getfield(trcinfo(p), f), getfield(i, f)), fieldnames(TRCInfo))
+end
+
 # Real captures, when a folder of them is named: every file must read, and agree with
 # what the descriptor promises.
 let dir = get(ENV, "LECROYTRC_REAL", "")

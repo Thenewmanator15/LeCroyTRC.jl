@@ -58,6 +58,7 @@ jobs:
         with:
           mode: alldeps
           julia_version: '1.9'
+          projects: ., test      # the test dependencies live in test/Project.toml
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
         with:

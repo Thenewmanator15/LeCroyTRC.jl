@@ -339,6 +339,8 @@ end
     @test readtrc(p).data1 == 1:5
 end
 
+include("parts.jl")
+
 @testset "any shape the template allows round-trips (property)" begin
     rng = MersenneTwister(20260925)
     for trial in 1:300

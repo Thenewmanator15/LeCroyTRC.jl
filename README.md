@@ -48,6 +48,25 @@ Manual (Appendix II, "Waveform Template"):
 surveying many captures. `readtrc(io)` reads from any stream (a file, a buffer, a pipe),
 forward only, and stops at the end of the record.
 
+## Reading a long trace in parts
+
+```julia
+info = trcinfo("C1--capture--00000.trc")         # the descriptor; no samples read
+codes = trcread("C1--capture--00000.trc", 4_000_001:4_010_000)   # a window, 1-based
+v = volts(info, codes); t = times(info, 4_000_001:4_010_000)
+
+out = Vector{Float32}(undef, 2^20)
+trcblocks("C1--capture--00000.trc"; blocksize = 2^20) do codes, offset
+    # codes: the next block (one buffer, reused); offset: 0-based index of codes[1]
+    volts!(view(out, 1:length(codes)), info, codes)
+end
+```
+
+`trcread` skips to the window in a file or buffer and reads its way there on any other
+stream. `trcblocks` also takes `memory`, a byte budget for its buffer.
+`readtrc(file; memory)` refuses a record whose samples would take more than `memory`
+bytes (default: the machine's memory, `Sys.total_memory()`) before reading any of them.
+
 `readtrc` runs at the speed of reading the file's bytes. Scaling costs more than reading:
 on a 50-million-point trace most of `volts(w)`'s time goes into filling its fresh
 `Float64` array. `volts!(buffer, w)` reuses one buffer across captures (about three times

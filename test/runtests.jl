@@ -340,6 +340,7 @@ end
 end
 
 include("parts.jl")
+include("mapped.jl")
 
 include("stress.jl")
 

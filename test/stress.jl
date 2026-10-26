@@ -26,6 +26,10 @@ end
 # the least of three @allocated readings, as @allocated can count other threads' work
 least_alloc(f) = minimum(_ -> (@allocated f()), 1:3)
 
+# in a function of its own, so the mapping is unreachable once it returns
+check_mapped(p, n, r, total) =
+    (m = trcmap(p); m.data1[end] == code(n) && m.data1[r] == code.(r) && sum(Int, m.data1) == total)
+
 function check_long(p, n; whole = true)
     i = trcinfo(p)
     @test i.wave_array_count == n
@@ -39,6 +43,10 @@ function check_long(p, n; whole = true)
     @test trcblocks((c, _) -> (s[] += sum(Int, c)), p; blocksize = 2^20) == n
     @test s[] == sum(k -> Int(code(k)), 1:n)
     @test least_alloc(() -> trcblocks((c, _) -> nothing, p; blocksize = 2^16)) < 2^17 + 100_000
+    # mapped, not read: opens at once, whatever the size, and reads the same codes
+    @test least_alloc(() -> trcmap(p)) < 100_000
+    @test check_mapped(p, n, r, s[])
+    GC.gc()
     # the memory budget refuses before allocating
     @test_throws ArgumentError readtrc(p; memory = 2n - 1)
     @test least_alloc(() -> try readtrc(p; memory = 2n - 1) catch end) < 100_000

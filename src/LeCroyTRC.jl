@@ -21,9 +21,11 @@ it does not contain is refused with a [`LeCroyTRC.FormatError`](@ref), never mis
 module LeCroyTRC
 
 using Dates
+using MappedArrays: mappedarray
+import Mmap
 import PrecompileTools
 
-export readtrc, trcinfo, trcread, trcblocks, TRCWaveform, TRCInfo, volts, volts!, times,
+export readtrc, trcinfo, trcread, trcblocks, trcmap, TRCWaveform, TRCInfo, volts, volts!, times,
        segments, nsegments
 
 """
@@ -133,11 +135,14 @@ A LeCroy waveform: its [`TRCInfo`](@ref) in `info`, and the samples as stored, `
 `Int8` (byte) or `Int16` (word). `data1` is DATA_ARRAY_1 (every segment, one after
 another); `data2` is DATA_ARRAY_2, empty unless the record carries one (the floor of an
 extrema record, the imaginary part of a complex one, the min/max pairs of peak detect).
+
+They are `Vector{T}`s, or read-only arrays over the mapped file for
+[`trcmap`](@ref); the second type parameter is their type.
 """
-struct TRCWaveform{T<:Union{Int8,Int16}}
+struct TRCWaveform{T<:Union{Int8,Int16},A<:AbstractVector{T}}
     info::TRCInfo
-    data1::Vector{T}
-    data2::Vector{T}
+    data1::A
+    data2::A
 end
 
 # ── reading ────────────────────────────────────────────────────────────────────
@@ -166,18 +171,70 @@ readtrc(file::AbstractString; memory::Integer = Sys.total_memory()) =
 
 function readtrc(io::IO; memory::Integer = Sys.total_memory())
     info = trcinfo(io)
-    need = Int64(info.wave_array_1) + Int64(info.wave_array_2)
-    # a record the input cannot hold is a FormatError, whatever the budget
-    _need(io, need, info.wave_array_2 > 0 ? "DATA_ARRAY_1 and DATA_ARRAY_2" : "DATA_ARRAY_1")
+    need = _need_data(io, info)
     need <= memory || throw(ArgumentError("the samples take $need bytes, more than memory = $memory; " *
-                                          "read them in parts with trcread or trcblocks"))
+                                          "read them in parts with trcread or trcblocks, or map them with trcmap"))
     T = _eltype(info)
     big = info.comm_order === :big
     data1 = _read_array(io, T, info.wave_array_1, big, "DATA_ARRAY_1")
     data2 = _read_array(io, T, info.wave_array_2, big, "DATA_ARRAY_2")
     _discard(io, Int(info.res_array2) + Int(info.res_array3), "RES_ARRAY2/RES_ARRAY3")
-    TRCWaveform{T}(info, data1, data2)
+    TRCWaveform{T,Vector{T}}(info, data1, data2)
 end
+
+# The bytes of the data arrays, once the input is known to hold them: a record the
+# input cannot hold is a FormatError, whatever the memory budget.
+function _need_data(io, info)
+    need = Int64(info.wave_array_1) + Int64(info.wave_array_2)
+    _need(io, need, info.wave_array_2 > 0 ? "DATA_ARRAY_1 and DATA_ARRAY_2" : "DATA_ARRAY_1")
+    need
+end
+
+"""
+    trcmap(file) -> TRCWaveform
+    trcmap(io::IOStream) -> TRCWaveform
+
+[`readtrc`](@ref), with the samples mapped from the file rather than read: `data1` and
+`data2` are read-only arrays over it, the operating system reads only the pages that are
+touched, and a record of any size opens at once. A stream is left at the end of the
+record, as `readtrc` leaves it; the arrays stay valid after the file is closed.
+
+The arrays read the file as it is when they are indexed. While the waveform is alive, do
+not let anything change the file: on Windows it cannot be deleted, truncated or
+replaced; elsewhere a truncated file makes indexing past its new end crash the process.
+For a file that may still be written to, use `readtrc`.
+"""
+trcmap(file::AbstractString) = _named(file, () -> open(trcmap, file))
+
+function trcmap(io::IOStream)
+    info = trcinfo(io)
+    _need_data(io, info)
+    _mapped(io, info, _eltype(info))
+end
+
+# a function barrier, so that each T infers on its own
+function _mapped(io, info, ::Type{T}) where {T}
+    big = info.comm_order === :big
+    data1 = _map_array(io, T, info.wave_array_1, big)
+    data2 = _map_array(io, T, info.wave_array_2, big)
+    _discard(io, Int(info.res_array2) + Int(info.res_array3), "RES_ARRAY2/RES_ARRAY3")
+    TRCWaveform{T,typeof(data1)}(info, data1, data2)
+end
+
+# The next `nbytes` of a file as read-only `T` codes in this machine's byte order, mapped,
+# not read. Byte-wise, then reinterpreted: the data often start at an odd offset.
+function _map_array(io::IOStream, ::Type{T}, nbytes, big::Bool) where {T}
+    bytes = nbytes == 0 ? UInt8[] :
+            Mmap.mmap(io, Vector{UInt8}, (Int(nbytes),), position(io); grow = false)::Vector{UInt8}
+    skip(io, nbytes)
+    mappedarray(_ByteOrder(_swap(big)), reinterpret(T, bytes))
+end
+
+# One function type for both byte orders, so a lazy waveform has one type per T.
+struct _ByteOrder
+    swap::Bool
+end
+(o::_ByteOrder)(x) = o.swap ? _bswap(x) : x
 
 _eltype(info) = info.comm_type === :byte ? Int8 : Int16
 
@@ -627,6 +684,8 @@ PrecompileTools.@setup_workload begin
         info = trcinfo(example)
         open(readtrc, example)
         readtrc(IOBuffer(read(example)))
+        m = trcmap(example)
+        volts(m); times(m)
         codes = trcread(example, 1:100)
         volts(info, codes); times(info, 1:100)
         out = zeros(Float32, 64)

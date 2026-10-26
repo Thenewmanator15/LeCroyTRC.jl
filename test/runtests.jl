@@ -341,6 +341,8 @@ end
 
 include("parts.jl")
 
+include("stress.jl")
+
 @testset "any shape the template allows round-trips (property)" begin
     rng = MersenneTwister(20260925)
     for trial in 1:300

@@ -400,6 +400,8 @@ end
     @test all(f -> isequal(getfield(trcinfo(p), f), getfield(i, f)), fieldnames(TRCInfo))
 end
 
+VERSION >= v"1.9" && include("extensions.jl")
+
 # Real captures, when a folder of them is named: every file must read, and agree with
 # what the descriptor promises.
 let dir = get(ENV, "LECROYTRC_REAL", "")

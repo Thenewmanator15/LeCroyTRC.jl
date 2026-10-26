@@ -543,6 +543,25 @@ function _axis(i::TRCInfo, start, n)
     range(start; step = Float64(i.horiz_interval), length = n)
 end
 
+# ── with other packages: methods in ext/, loaded beside the package they name ────
+
+"""
+    LeCroyTRC.units(w::TRCWaveform) -> (horizontal = unit, vertical = unit)
+    LeCroyTRC.units(info::TRCInfo)
+
+The Unitful units of `w.info.horunit` and `w.info.vertunit`, so that `times(w) * h` and
+`volts(w) * v` are quantities. LeCroy writes seconds as `"S"`, which is read as seconds,
+not siemens; any other string goes to `Unitful.uparse`, and one it does not read is an
+`ArgumentError`. Needs `using Unitful`, which loads its methods.
+"""
+function units end
+
+"""
+The loader FileIO calls for a `.trc` file: `FileIO.load("x.trc"; kwargs...)` is
+`readtrc("x.trc"; kwargs...)`, and the same for a stream. Its methods load with FileIO.
+"""
+function fileio_load end
+
 # ── display ─────────────────────────────────────────────────────────────────────
 
 Base.show(io::IO, w::TRCWaveform{T}) where {T} =

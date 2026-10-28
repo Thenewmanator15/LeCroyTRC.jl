@@ -41,6 +41,30 @@ jobs:
           use_oidc: true
           fail_ci_if_error: false
 
+  # The tests against the oldest versions the compat entries allow, weak dependencies
+  # included, on Julia 1.9: the first with package extensions, and the oldest the
+  # resolver runs on. The matrix above tests only the newest versions.
+  downgrade:
+    name: Lowest compat versions - Julia 1.9
+    # Julia 1.9's libopenlibm asks for an executable stack, which the C library of the
+    # current ubuntu-latest refuses ("cannot enable executable stack"); 22.04's allows it.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.9'
+      - uses: julia-actions/julia-downgrade-compat@v2
+        with:
+          mode: alldeps
+          julia_version: '1.9'
+          projects: ., test      # the test dependencies live in test/Project.toml
+      - uses: julia-actions/julia-buildpkg@v1
+      - uses: julia-actions/julia-runtest@v1
+        with:
+          allow_reresolve: false
+          force_latest_compatible_version: false
+
   crosscheck:
     name: Cross-check against lecroyutils (Python)
     runs-on: ubuntu-latest

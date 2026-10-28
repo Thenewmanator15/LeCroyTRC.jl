@@ -144,6 +144,9 @@ struct TRCWaveform{T<:Union{Int8,Int16},A<:AbstractVector{T}}
     data1::A
     data2::A
 end
+# TRCWaveform{Int16}(info, data1, data2), as before the arrays' type was a parameter
+TRCWaveform{T}(info::TRCInfo, data1::A, data2::A) where {T,A<:AbstractVector{T}} =
+    TRCWaveform{T,A}(info, data1, data2)
 
 # ── reading ────────────────────────────────────────────────────────────────────
 
@@ -207,8 +210,9 @@ touched, and a record of any size opens at once. A stream is left at the end of 
 record, as `readtrc` leaves it; the arrays stay valid after the file is closed.
 
 The arrays read the file as it is when they are indexed. While the waveform is alive, do
-not let anything change the file: on Windows it cannot be deleted, truncated or
-replaced; elsewhere a truncated file makes indexing past its new end crash the process.
+not let anything change the file: on Windows it cannot be deleted or truncated (a file
+moved over it leaves the arrays on the old contents); elsewhere a truncated file makes
+indexing past its new end crash the process.
 For a file that may still be written to, use `readtrc`.
 """
 trcmap(file::AbstractString) = _named(file, () -> open(trcmap, file))
@@ -268,7 +272,8 @@ function _trcread(io, r)
     info = trcinfo(io)
     T = _eltype(info)
     n = Int(info.wave_array_count)
-    isempty(r) || (1 <= first(r) && last(r) <= n) || throw(BoundsError(1:n, r))
+    isempty(r) && return T[]                   # as for an array: any empty range, nothing read
+    1 <= first(r) && last(r) <= n || throw(BoundsError(1:n, r))
     _discard(io, (first(r) - 1) * sizeof(T), "DATA_ARRAY_1")
     _read_array(io, T, length(r) * sizeof(T), info.comm_order === :big, "DATA_ARRAY_1")
 end
@@ -321,10 +326,15 @@ function _trcblocks(f, io, blocksize, memory)
         end
         swap && map!(_bswap, buf, buf)
         at = seekable ? position(io) : 0
-        f(buf, done)
-        seekable && position(io) != at &&
-            throw(ArgumentError("f read from or moved the stream trcblocks is reading; " *
-                                "to read the file inside f, open it again"))
+        moved = ArgumentError("f read from or moved the stream trcblocks is reading; " *
+                              "to read the file inside f, open it again")
+        try
+            f(buf, done)
+        catch
+            seekable && position(io) != at && throw(moved)   # the cause of what f ran into
+            rethrow()
+        end
+        seekable && position(io) != at && throw(moved)
         done += k
     end
     n
@@ -342,8 +352,12 @@ trcinfo(file::AbstractString) = _named(file, () -> open(trcinfo, file))
 trcinfo(io::IO) = _locked(() -> _trcinfo(io), io)
 
 function _trcinfo(io)
-    head = read(io, SEARCH_BYTES)
-    isempty(head) && throw(FormatError("empty input: no WAVEDESC"))
+    head = read(io, SEARCH_BYTES + 7)           # WAVEDESC may start at byte SEARCH_BYTES - 1
+    if isempty(head)
+        isreadable(io) && !(io isa IOStream && !isopen(io)) ||
+            throw(ArgumentError("the stream is closed or not open for reading"))
+        throw(FormatError("empty input: no WAVEDESC"))
+    end
     o = _find(head, codeunits("WAVEDESC"))
     o === nothing &&
         throw(FormatError("no WAVEDESC in the first $SEARCH_BYTES bytes: not a LeCroy waveform"))
@@ -490,11 +504,14 @@ nsegments(w::TRCWaveform) = nsegments(w.info)
 """
     segments(w::TRCWaveform, v = w.data1) -> Matrix
 
-`v` (the codes, or anything of the same length such as `volts(w)`) with one column per
-segment. A reshape: no copy.
+`v` (the codes, or anything of the same length such as `volts(w)`, or of `data2`'s
+length) with one column per segment. A reshape: no copy.
 """
 function segments(w::TRCWaveform, v::AbstractVector = w.data1)
     n = nsegments(w)
+    length(v) == length(w.data1) || length(v) == length(w.data2) ||
+        throw(DimensionMismatch("v has $(length(v)) points; the waveform's arrays have " *
+                                "$(length(w.data1)) and $(length(w.data2))"))
     length(v) % n == 0 ||
         throw(FormatError("$(length(v)) points cannot be split into $n equal segments"))
     reshape(v, :, n)
@@ -551,7 +568,8 @@ end
 
 The Unitful units of `w.info.horunit` and `w.info.vertunit`, so that `times(w) * h` and
 `volts(w) * v` are quantities. LeCroy writes seconds as `"S"`, which is read as seconds,
-not siemens; any other string goes to `Unitful.uparse`, and one it does not read is an
+not siemens, also inside a compound such as `"V*S"`; an empty string is `NoUnits`. The
+rest goes to `Unitful.uparse`, and a string it does not read as a unit is an
 `ArgumentError`. Needs `using Unitful`, which loads its methods.
 """
 function units end
@@ -561,6 +579,16 @@ The loader FileIO calls for a `.trc` file: `FileIO.load("x.trc"; kwargs...)` is
 `readtrc("x.trc"; kwargs...)`, and the same for a stream. Its methods load with FileIO.
 """
 function fileio_load end
+
+# ── equality ────────────────────────────────────────────────────────────────────
+
+# Field by field, so that two reads of one file are equal (and a mapped waveform equals
+# the read one), and Set and unique see them as one.
+for X in (:TRCInfo, :TRCWaveform)
+    @eval Base.:(==)(a::$X, b::$X) = all(f -> getfield(a, f) == getfield(b, f), fieldnames($X))
+    @eval Base.isequal(a::$X, b::$X) = all(f -> isequal(getfield(a, f), getfield(b, f)), fieldnames($X))
+    @eval Base.hash(a::$X, h::UInt) = foldl((h, f) -> hash(getfield(a, f), h), fieldnames($X); init = hash($(QuoteNode(X)), h))
+end
 
 # ── display ─────────────────────────────────────────────────────────────────────
 

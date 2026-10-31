@@ -1,6 +1,8 @@
 [deps]
+Base64 = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 LeCroyTRC = "ff63a2ca-c320-4caa-833b-70ec8b3d2bed"
+SHA = "ea8e919c-243c-51af-8825-aaa63cd721ce"
 
 [compat]
 Documenter = "1"
